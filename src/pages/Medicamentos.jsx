@@ -19,6 +19,8 @@ export default function Medicamentos() {
   const [lotes, setLotes] = useState([])
   const [registros, setRegistros] = useState([])
   const [modalOpen, setModalOpen] = useState(false)
+  const [editando, setEditando] = useState(null)
+  const [confirmarExcluir, setConfirmarExcluir] = useState(null)
   const [form, setForm] = useState({ galpao_id: '', lote_id: '', data: new Date().toISOString().split('T')[0], tipo: 'vacina', produto: '', dose: '', via_aplicacao: 'Água', quantidade_aves: '', observacoes: '' })
   const [saving, setSaving] = useState(false)
   const [filtroTipo, setFiltroTipo] = useState('')
@@ -39,28 +41,37 @@ export default function Medicamentos() {
     setRegistros(r || [])
   }
 
+  function abrirEditar(r) {
+    setEditando(r)
+    setForm({ galpao_id: r.galpao_id || '', lote_id: r.lote_id || '', data: r.data, tipo: r.tipo, produto: r.produto, dose: r.dose || '', via_aplicacao: r.via_aplicacao || 'Água', quantidade_aves: r.quantidade_aves || '', observacoes: r.observacoes || '' })
+    setModalOpen(true)
+  }
+
   async function handleSave(e) {
     e.preventDefault()
     if (!form.produto) { toast.error('Informe o produto.'); return }
     setSaving(true)
-    const { error } = await supabase.from('medicamentos').insert({
-      produtor_id: user.id,
-      galpao_id: form.galpao_id || null,
-      lote_id: form.lote_id || null,
-      data: form.data,
-      tipo: form.tipo,
-      produto: form.produto,
-      dose: form.dose || null,
-      via_aplicacao: form.via_aplicacao || null,
-      quantidade_aves: form.quantidade_aves ? parseInt(form.quantidade_aves) : null,
-      observacoes: form.observacoes || null,
-    })
+    const payload = { galpao_id: form.galpao_id || null, lote_id: form.lote_id || null, data: form.data, tipo: form.tipo, produto: form.produto, dose: form.dose || null, via_aplicacao: form.via_aplicacao || null, quantidade_aves: form.quantidade_aves ? parseInt(form.quantidade_aves) : null, observacoes: form.observacoes || null }
+    let error
+    if (editando) {
+      ({ error } = await supabase.from('medicamentos').update(payload).eq('id', editando.id))
+    } else {
+      ({ error } = await supabase.from('medicamentos').insert({ produtor_id: user.id, ...payload }))
+    }
     if (error) { toast.error('Erro: ' + error.message); setSaving(false); return }
-    toast.success('Registro salvo!')
+    toast.success(editando ? 'Registro atualizado!' : 'Registro salvo!')
     setModalOpen(false)
+    setEditando(null)
     setForm(f => ({ ...f, produto: '', dose: '', quantidade_aves: '', observacoes: '' }))
     loadData()
     setSaving(false)
+  }
+
+  async function excluir(id) {
+    await supabase.from('medicamentos').delete().eq('id', id)
+    toast.success('Registro excluído.')
+    setConfirmarExcluir(null)
+    loadData()
   }
 
   const filtrados = filtroTipo ? registros.filter(r => r.tipo === filtroTipo) : registros
@@ -76,12 +87,25 @@ export default function Medicamentos() {
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-        <div>
+      {confirmarExcluir && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+          <div style={{ background: 'white', borderRadius: 16, padding: 32, maxWidth: 380, width: '100%', textAlign: 'center' }}>
+            <div style={{ fontSize: 40, marginBottom: 8 }}>🗑️</div>
+            <h3 style={{ fontSize: 17, fontWeight: 700, marginBottom: 8 }}>Excluir registro?</h3>
+            <p style={{ fontSize: 14, color: '#6b7280', marginBottom: 24 }}><strong>{confirmarExcluir.produto}</strong> será removido.</p>
+            <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
+              <button onClick={() => setConfirmarExcluir(null)} className="btn btn-secondary">Cancelar</button>
+              <button onClick={() => excluir(confirmarExcluir.id)} style={{ background: '#ef4444', color: 'white', border: 'none', borderRadius: 8, padding: '10px 24px', fontWeight: 700, cursor: 'pointer' }}>Excluir</button>
+            </div>
+          </div>
+        </div>
+      )}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24, gap: 12 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
           <h1 className="page-title">💉 Vacinas e Medicamentos</h1>
           <p className="page-subtitle">{registros.length} registro(s)</p>
         </div>
-        <button className="btn btn-primary" onClick={() => setModalOpen(true)}>+ Novo Registro</button>
+        <button className="btn btn-primary" onClick={() => { setEditando(null); setForm({ galpao_id: '', lote_id: '', data: new Date().toISOString().split('T')[0], tipo: 'vacina', produto: '', dose: '', via_aplicacao: 'Água', quantidade_aves: '', observacoes: '' }); setModalOpen(true) }}>+ Novo Registro</button>
       </div>
 
       {/* Calendário de vacinação */}
@@ -124,7 +148,7 @@ export default function Medicamentos() {
           <div style={{ overflowX: 'auto' }}>
             <table className="table">
               <thead>
-                <tr>{['Data', 'Tipo', 'Produto', 'Galpão', 'Via', 'Dose', 'Obs.'].map(h => <th key={h}>{h}</th>)}</tr>
+                <tr>{['Data', 'Tipo', 'Produto', 'Galpão', 'Via', 'Dose', 'Obs.', 'Ações'].map(h => <th key={h}>{h}</th>)}</tr>
               </thead>
               <tbody>
                 {filtrados.map(r => {
@@ -137,7 +161,11 @@ export default function Medicamentos() {
                       <td>{r.galpoes?.nome || '-'}</td>
                       <td>{r.via_aplicacao || '-'}</td>
                       <td>{r.dose || '-'}</td>
-                      <td style={{ color: 'var(--text-muted)', maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.observacoes || '-'}</td>
+                      <td style={{ color: 'var(--text-muted)', maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.observacoes || '-'}</td>
+                      <td><div style={{ display: 'flex', gap: 6 }}>
+                        <button onClick={() => abrirEditar(r)} style={{ background: '#dbeafe', color: '#1d4ed8', border: 'none', borderRadius: 6, padding: '4px 10px', fontWeight: 700, cursor: 'pointer', fontSize: 12 }}>✏️</button>
+                        <button onClick={() => setConfirmarExcluir(r)} style={{ background: '#fee2e2', color: '#ef4444', border: 'none', borderRadius: 6, padding: '4px 10px', fontWeight: 700, cursor: 'pointer', fontSize: 12 }}>🗑️</button>
+                      </div></td>
                     </tr>
                   )
                 })}
@@ -148,9 +176,12 @@ export default function Medicamentos() {
       </div>
 
       {modalOpen && (
-        <div className="modal-overlay">
+        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setModalOpen(false)}>
           <div className="modal">
-            <h2 style={{ fontSize: 18, fontWeight: 800, marginBottom: 20 }}>💉 Novo Registro</h2>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0 }}>💉 {editando ? 'Editar Registro' : 'Novo Registro'}</h2>
+              <button onClick={() => setModalOpen(false)} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: 'var(--text-muted)' }}>✕</button>
+            </div>
             <form onSubmit={handleSave}>
               <div className="form-row">
                 <div className="form-group">
@@ -199,7 +230,7 @@ export default function Medicamentos() {
               </div>
               <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', marginTop: 8 }}>
                 <button type="button" className="btn btn-secondary" onClick={() => setModalOpen(false)}>Cancelar</button>
-                <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Salvando...' : 'Salvar'}</button>
+                <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Salvando...' : editando ? 'Atualizar' : 'Salvar'}</button>
               </div>
             </form>
           </div>

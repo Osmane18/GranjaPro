@@ -9,6 +9,14 @@ export default function Relatorios() {
   const [loteSel, setLoteSel] = useState(null)
   const [dados, setDados] = useState(null)
   const [loading, setLoading] = useState(false)
+  const [precoVibra, setPrecoVibra] = useState(() => parseFloat(localStorage.getItem('granja_preco_vibra') || '5.80'))
+  const [editPreco, setEditPreco] = useState(false)
+
+  function salvarPreco(val) {
+    const n = parseFloat(val)
+    if (!isNaN(n) && n > 0) { localStorage.setItem('granja_preco_vibra', n); setPrecoVibra(n) }
+    setEditPreco(false)
+  }
 
   useEffect(() => { loadLotes() }, [])
 
@@ -26,11 +34,13 @@ export default function Relatorios() {
     setLoading(true)
     setLoteSel(lote)
 
-    const [{ data: registros }, { data: racao }, { data: agua }, { data: ocorrencias }] = await Promise.all([
+    const dataFim = lote.data_saida || new Date().toISOString().split('T')[0]
+    const [{ data: registros }, { data: racao }, { data: agua }, { data: ocorrencias }, { data: despesas }] = await Promise.all([
       supabase.from('registros_diarios').select('*').eq('lote_id', lote.id).order('data_registro'),
-      supabase.from('consumo_racao').select('*').eq('galpao_id', lote.galpao_id).gte('data', lote.data_entrada).lte('data', lote.data_saida || new Date().toISOString().split('T')[0]),
-      supabase.from('consumo_agua').select('*').eq('galpao_id', lote.galpao_id).gte('data', lote.data_entrada).lte('data', lote.data_saida || new Date().toISOString().split('T')[0]),
+      supabase.from('consumo_racao').select('*').or(`galpao_id.eq.${lote.galpao_id},lote_id.eq.${lote.id}`).gte('data', lote.data_entrada).lte('data', dataFim),
+      supabase.from('consumo_agua').select('*').eq('galpao_id', lote.galpao_id).gte('data', lote.data_entrada).lte('data', dataFim),
       supabase.from('ocorrencias').select('*').eq('galpao_id', lote.galpao_id).gte('data', lote.data_entrada),
+      supabase.from('despesas').select('*').eq('lote_id', lote.id),
     ])
 
     const mortalidadeTotal = (registros || []).reduce((s, r) => s + (r.mortalidade || 0), 0)
@@ -47,19 +57,32 @@ export default function Relatorios() {
     const pesoTotalEstimado = ultimoPeso ? (ultimoPeso / 1000) * avesFinais : null
     const conversaoAlimentar = (pesoTotalEstimado && totalRacao) ? (totalRacao / pesoTotalEstimado).toFixed(3) : null
 
-    // Estimativa financeira (valores aproximados Vibra)
-    const precoMedioKg = 5.80 // R$/kg vivo (estimativa)
-    const custoPintinho = 3.20 // R$/pintinho (estimativa)
-    const custoRacaoKg = 1.85 // R$/kg (estimativa)
-    const receitaEstimada = pesoTotalEstimado ? pesoTotalEstimado * precoMedioKg : null
-    const custoEstimado = (lote.quantidade_pintinhos * custoPintinho) + (totalRacao * custoRacaoKg)
-    const lucroEstimado = receitaEstimada ? receitaEstimada - custoEstimado : null
+    // Modelo integração Vibra: pintinhos, ração e vacinas são fornecidos pela integradora
+    // Custos reais = apenas despesas do produtor (energia, mão de obra, manutenção, etc.)
+    const totalDespesas = (despesas || []).reduce((s, d) => s + (d.valor || 0), 0)
+    const receitaEstimada = pesoTotalEstimado ? pesoTotalEstimado * precoVibra : null
+    const lucroEstimado = receitaEstimada != null ? receitaEstimada - totalDespesas : null
+
+    // IEP — Índice de Eficiência Produtiva
+    const viabilidade = avesFinais / lote.quantidade_pintinhos * 100
+    const gpmDia = ultimoPeso ? (ultimoPeso / 1000) / diasLote : null
+    const iep = (gpmDia && conversaoAlimentar && diasLote > 0)
+      ? ((viabilidade * gpmDia * 100) / (parseFloat(conversaoAlimentar) * 10)).toFixed(1)
+      : null
+
+    // Despesas por categoria
+    const despesasPorCategoria = (despesas || []).reduce((acc, d) => {
+      acc[d.categoria] = (acc[d.categoria] || 0) + d.valor
+      return acc
+    }, {})
 
     setDados({
       mortalidadeTotal, mortalidadePct, avesFinais, diasLote,
       totalRacao, totalAgua, ultimoPeso, pesoTotalEstimado,
-      conversaoAlimentar, receitaEstimada, custoEstimado, lucroEstimado,
+      conversaoAlimentar, receitaEstimada, totalDespesas, lucroEstimado,
+      iep, viabilidade: viabilidade.toFixed(1),
       registros: registros || [], ocorrencias: ocorrencias || [],
+      despesasPorCategoria,
       resumoRacao: (racao || []).reduce((acc, r) => {
         if (r.tipo_movimento !== 'consumo') return acc
         acc[r.tipo_racao] = (acc[r.tipo_racao] || 0) + r.quantidade_kg
@@ -74,9 +97,11 @@ export default function Relatorios() {
 
   return (
     <div>
-      <div style={{ marginBottom: 24 }}>
-        <h1 className="page-title">📊 Relatórios</h1>
-        <p className="page-subtitle">Desempenho por lote</p>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24, flexWrap: 'wrap', gap: 12 }}>
+        <div>
+          <h1 className="page-title">📊 Relatórios</h1>
+          <p className="page-subtitle">Desempenho por lote · Modelo integração Vibra</p>
+        </div>
       </div>
 
       {/* Seleção de lote */}
@@ -88,7 +113,7 @@ export default function Relatorios() {
         }}>
           {lotes.map(l => (
             <option key={l.id} value={l.id}>
-              {l.galpoes?.nome} — Lote {l.numero_lote || '#'} ({format(new Date(l.data_entrada + 'T00:00:00'), 'dd/MM/yyyy')}) [{l.status}]
+              {l.galpoes?.nome} — {l.numero_lote ? `Lote ${l.numero_lote}` : `Lote de ${format(new Date(l.data_entrada + 'T00:00:00'), 'dd/MM/yyyy')}`} [{l.status}]
             </option>
           ))}
         </select>
@@ -103,7 +128,7 @@ export default function Relatorios() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
               <div>
                 <h2 style={{ fontSize: 20, fontWeight: 900, color: 'white', marginBottom: 4 }}>
-                  🏚️ {loteSel.galpoes?.nome} — Lote {loteSel.numero_lote || '#'}
+                  🏚️ {loteSel.galpoes?.nome} — {loteSel.numero_lote ? `Lote ${loteSel.numero_lote}` : `Lote de ${format(new Date(loteSel.data_entrada + 'T00:00:00'), 'dd/MM/yyyy')}`}
                 </h2>
                 <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.8)' }}>
                   {format(new Date(loteSel.data_entrada + 'T00:00:00'), 'dd/MM/yyyy')}
@@ -165,22 +190,75 @@ export default function Relatorios() {
             </div>
           </div>
 
-          {/* Resultado financeiro estimado */}
-          <div className="card" style={{ padding: 20, marginBottom: 16, border: '2px solid var(--green)' }}>
-            <h3 className="card-title">💰 Resultado Financeiro Estimado</h3>
-            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>*Valores estimados — Preço médio R$5,80/kg, pintinho R$3,20, ração R$1,85/kg</p>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+          {/* IEP */}
+          <div className="card" style={{ padding: 20, marginBottom: 16, border: `2px solid ${dados.iep == null ? 'var(--border)' : parseFloat(dados.iep) >= 300 ? 'var(--green)' : parseFloat(dados.iep) >= 200 ? '#f59e0b' : '#ef4444'}` }}>
+            <h3 className="card-title">📊 IEP — Índice de Eficiência Produtiva</h3>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
               {[
-                { label: 'Receita Estimada', val: fmtR(dados.receitaEstimada), cor: 'var(--green-dark)' },
-                { label: 'Custo Estimado', val: fmtR(dados.custoEstimado), cor: '#ef4444' },
-                { label: 'Lucro Estimado', val: fmtR(dados.lucroEstimado), cor: dados.lucroEstimado >= 0 ? 'var(--green-dark)' : '#ef4444' },
+                { label: 'IEP', val: dados.iep ?? '—', cor: dados.iep == null ? '#6b7280' : parseFloat(dados.iep) >= 300 ? 'var(--green-dark)' : parseFloat(dados.iep) >= 200 ? '#f59e0b' : '#ef4444', desc: '≥300 excelente · ≥200 bom' },
+                { label: 'Viabilidade', val: `${dados.viabilidade}%`, cor: parseFloat(dados.viabilidade) >= 97 ? 'var(--green-dark)' : '#f59e0b', desc: 'aves vivas / iniciais' },
+                { label: 'Conv. Alimentar', val: dados.conversaoAlimentar ?? '—', cor: dados.conversaoAlimentar && parseFloat(dados.conversaoAlimentar) <= 1.8 ? 'var(--green-dark)' : '#f59e0b', desc: '≤1,8 é excelente' },
               ].map(m => (
-                <div key={m.label} style={{ textAlign: 'center', padding: 12, background: 'var(--bg)', borderRadius: 8 }}>
+                <div key={m.label} style={{ textAlign: 'center', padding: 14, background: 'var(--bg)', borderRadius: 10 }}>
                   <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>{m.label}</div>
-                  <div style={{ fontSize: 22, fontWeight: 900, color: m.cor }}>{m.val}</div>
+                  <div style={{ fontSize: 28, fontWeight: 900, color: m.cor }}>{m.val}</div>
+                  <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>{m.desc}</div>
                 </div>
               ))}
             </div>
+          </div>
+
+          {/* Resultado financeiro — modelo integração */}
+          <div className="card" style={{ padding: 20, marginBottom: 16, border: '2px solid var(--green)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexWrap: 'wrap', gap: 8 }}>
+              <h3 className="card-title" style={{ marginBottom: 0 }}>💰 Resultado Financeiro</h3>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Preço Vibra/kg:</span>
+                {editPreco ? (
+                  <input className="form-input" style={{ width: 90, marginBottom: 0, fontSize: 13 }} defaultValue={precoVibra}
+                    onKeyDown={e => e.key === 'Enter' && salvarPreco(e.target.value)}
+                    ref={el => el?.focus()} onBlur={e => salvarPreco(e.target.value)} />
+                ) : (
+                  <button className="btn btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => setEditPreco(true)}>
+                    R$ {precoVibra.toFixed(2)} ✏️
+                  </button>
+                )}
+              </div>
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 14, padding: '8px 12px', background: '#f0fdf4', borderRadius: 8 }}>
+              ✅ <strong>Modelo integração Vibra:</strong> pintinhos, ração e vacinas são fornecidos pela integradora — não entram como custo do produtor.
+              Custos considerados: despesas registradas no lote (energia, mão de obra, manutenção, etc.)
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+              {[
+                { label: 'Receita Estimada', val: fmtR(dados.receitaEstimada), cor: 'var(--green-dark)', desc: `${fmt(dados.pesoTotalEstimado, 0)}kg × R$${precoVibra.toFixed(2)}` },
+                { label: 'Despesas do Produtor', val: fmtR(dados.totalDespesas), cor: '#ef4444', desc: 'energia, mão de obra, etc.' },
+                { label: 'Lucro Estimado', val: fmtR(dados.lucroEstimado), cor: dados.lucroEstimado != null && dados.lucroEstimado >= 0 ? 'var(--green-dark)' : '#ef4444', desc: 'receita − despesas' },
+              ].map(m => (
+                <div key={m.label} style={{ textAlign: 'center', padding: 14, background: 'var(--bg)', borderRadius: 10 }}>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>{m.label}</div>
+                  <div style={{ fontSize: 22, fontWeight: 900, color: m.cor }}>{m.val}</div>
+                  <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>{m.desc}</div>
+                </div>
+              ))}
+            </div>
+            {Object.keys(dados.despesasPorCategoria).length > 0 && (
+              <div style={{ marginTop: 14 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 8 }}>Despesas por categoria:</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  {Object.entries(dados.despesasPorCategoria).map(([cat, val]) => (
+                    <div key={cat} style={{ background: '#fef3c7', borderRadius: 8, padding: '6px 12px', fontSize: 12 }}>
+                      <strong>{cat}:</strong> {fmtR(val)}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {Object.keys(dados.despesasPorCategoria).length === 0 && (
+              <div style={{ marginTop: 12, padding: '10px 14px', background: '#fef3c7', borderRadius: 8, fontSize: 12, color: '#92400e' }}>
+                ⚠️ Nenhuma despesa registrada para este lote. Acesse <strong>Despesas</strong> e vincule os gastos ao lote para ver o lucro real.
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -11,7 +11,9 @@ export default function Racao() {
   const [lotes, setLotes] = useState([])
   const [registros, setRegistros] = useState([])
   const [modalOpen, setModalOpen] = useState(false)
-  const [tipoModal, setTipoModal] = useState('consumo') // 'consumo' | 'estoque'
+  const [tipoModal, setTipoModal] = useState('consumo')
+  const [editando, setEditando] = useState(null)
+  const [confirmarExcluir, setConfirmarExcluir] = useState(null)
   const [form, setForm] = useState({ galpao_id: '', lote_id: '', data: new Date().toISOString().split('T')[0], tipo_racao: 'Inicial', quantidade_kg: '', tipo_movimento: 'consumo', observacoes: '' })
   const [saving, setSaving] = useState(false)
   const [galpaoFiltro, setGalpaoFiltro] = useState('')
@@ -35,8 +37,16 @@ export default function Racao() {
   }
 
   function abrirModal(tipo) {
+    setEditando(null)
     setTipoModal(tipo)
     setForm(f => ({ ...f, tipo_movimento: tipo === 'estoque' ? 'entrada' : 'consumo', quantidade_kg: '', observacoes: '' }))
+    setModalOpen(true)
+  }
+
+  function abrirEditar(r) {
+    setEditando(r)
+    setTipoModal(r.tipo_movimento === 'entrada' ? 'estoque' : 'consumo')
+    setForm({ galpao_id: r.galpao_id, lote_id: r.lote_id || '', data: r.data, tipo_racao: r.tipo_racao || 'Inicial', quantidade_kg: r.quantidade_kg, tipo_movimento: r.tipo_movimento, observacoes: r.observacoes || '' })
     setModalOpen(true)
   }
 
@@ -44,21 +54,26 @@ export default function Racao() {
     e.preventDefault()
     if (!form.galpao_id || !form.quantidade_kg) { toast.error('Preencha galpão e quantidade.'); return }
     setSaving(true)
-    const { error } = await supabase.from('consumo_racao').insert({
-      produtor_id: user.id,
-      galpao_id: form.galpao_id,
-      lote_id: form.lote_id || null,
-      data: form.data,
-      tipo_racao: form.tipo_racao,
-      quantidade_kg: parseFloat(form.quantidade_kg),
-      tipo_movimento: form.tipo_movimento,
-      observacoes: form.observacoes || null,
-    })
+    const payload = { galpao_id: form.galpao_id, lote_id: form.lote_id || null, data: form.data, tipo_racao: form.tipo_racao, quantidade_kg: parseFloat(form.quantidade_kg), tipo_movimento: form.tipo_movimento, observacoes: form.observacoes || null }
+    let error
+    if (editando) {
+      ({ error } = await supabase.from('consumo_racao').update(payload).eq('id', editando.id))
+    } else {
+      ({ error } = await supabase.from('consumo_racao').insert({ produtor_id: user.id, ...payload }))
+    }
     if (error) { toast.error('Erro: ' + error.message); setSaving(false); return }
-    toast.success(form.tipo_movimento === 'entrada' ? 'Estoque registrado!' : 'Consumo registrado!')
+    toast.success(editando ? 'Registro atualizado!' : form.tipo_movimento === 'entrada' ? 'Estoque registrado!' : 'Consumo registrado!')
     setModalOpen(false)
+    setEditando(null)
     loadData()
     setSaving(false)
+  }
+
+  async function excluir(id) {
+    await supabase.from('consumo_racao').delete().eq('id', id)
+    toast.success('Registro excluído.')
+    setConfirmarExcluir(null)
+    loadData()
   }
 
   const filtrados = galpaoFiltro ? registros.filter(r => r.galpao_id === galpaoFiltro) : registros
@@ -79,8 +94,8 @@ export default function Racao() {
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-        <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24, gap: 12 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
           <h1 className="page-title">🌽 Ração</h1>
           <p className="page-subtitle">Controle de estoque e consumo</p>
         </div>
@@ -152,7 +167,7 @@ export default function Racao() {
           <div style={{ overflowX: 'auto' }}>
             <table className="table">
               <thead>
-                <tr>{['Data', 'Galpão', 'Tipo Ração', 'Movimento', 'Quantidade', 'Obs.'].map(h => <th key={h}>{h}</th>)}</tr>
+                <tr>{['Data', 'Galpão', 'Tipo Ração', 'Movimento', 'Quantidade', 'Obs.', 'Ações'].map(h => <th key={h}>{h}</th>)}</tr>
               </thead>
               <tbody>
                 {filtrados.map(r => (
@@ -166,7 +181,11 @@ export default function Racao() {
                       </span>
                     </td>
                     <td style={{ fontWeight: 700 }}>{r.quantidade_kg?.toLocaleString('pt-BR')} kg</td>
-                    <td style={{ color: 'var(--text-muted)', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.observacoes || '-'}</td>
+                    <td style={{ color: 'var(--text-muted)', maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.observacoes || '-'}</td>
+                    <td><div style={{ display: 'flex', gap: 6 }}>
+                      <button onClick={() => abrirEditar(r)} style={{ background: '#dbeafe', color: '#1d4ed8', border: 'none', borderRadius: 6, padding: '4px 10px', fontWeight: 700, cursor: 'pointer', fontSize: 12 }}>✏️</button>
+                      <button onClick={() => setConfirmarExcluir(r)} style={{ background: '#fee2e2', color: '#ef4444', border: 'none', borderRadius: 6, padding: '4px 10px', fontWeight: 700, cursor: 'pointer', fontSize: 12 }}>🗑️</button>
+                    </div></td>
                   </tr>
                 ))}
               </tbody>
@@ -175,12 +194,29 @@ export default function Racao() {
         )}
       </div>
 
+      {confirmarExcluir && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+          <div style={{ background: 'white', borderRadius: 16, padding: 32, maxWidth: 380, width: '100%', textAlign: 'center' }}>
+            <div style={{ fontSize: 40, marginBottom: 8 }}>🗑️</div>
+            <h3 style={{ fontSize: 17, fontWeight: 700, marginBottom: 8 }}>Excluir registro?</h3>
+            <p style={{ fontSize: 14, color: '#6b7280', marginBottom: 24 }}>{confirmarExcluir.quantidade_kg} kg — {format(new Date(confirmarExcluir.data + 'T00:00:00'), 'dd/MM/yyyy')}</p>
+            <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
+              <button onClick={() => setConfirmarExcluir(null)} className="btn btn-secondary">Cancelar</button>
+              <button onClick={() => excluir(confirmarExcluir.id)} style={{ background: '#ef4444', color: 'white', border: 'none', borderRadius: 8, padding: '10px 24px', fontWeight: 700, cursor: 'pointer' }}>Excluir</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {modalOpen && (
-        <div className="modal-overlay">
+        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setModalOpen(false)}>
           <div className="modal">
-            <h2 style={{ fontSize: 18, fontWeight: 800, marginBottom: 20 }}>
-              🌽 {tipoModal === 'estoque' ? 'Entrada de Estoque' : 'Registrar Consumo'}
-            </h2>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0 }}>
+                🌽 {editando ? 'Editar Registro' : tipoModal === 'estoque' ? 'Entrada de Estoque' : 'Registrar Consumo'}
+              </h2>
+              <button onClick={() => setModalOpen(false)} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: 'var(--text-muted)' }}>✕</button>
+            </div>
             <form onSubmit={handleSave}>
               <div className="form-row">
                 <div className="form-group">

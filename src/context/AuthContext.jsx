@@ -5,16 +5,36 @@ const AuthContext = createContext({})
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
+  const [plano, setPlano] = useState(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       setUser(session?.user ?? null)
-      setLoading(false)
+
+      if (!session?.user) {
+        setPlano(null)
+        setLoading(false)
+        return
+      }
+
+      // setTimeout evita conflito com o lock interno do Supabase
+      setTimeout(async () => {
+        try {
+          const { data } = await supabase
+            .from('usuarios_plano')
+            .select('*')
+            .eq('id', session.user.id)
+            .single()
+          setPlano(data || null)
+        } catch {
+          setPlano(null)
+        } finally {
+          setLoading(false)
+        }
+      }, 0)
     })
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null)
-    })
+
     return () => subscription.unsubscribe()
   }, [])
 
@@ -27,7 +47,7 @@ export function AuthProvider({ children }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, signIn, signOut }}>
+    <AuthContext.Provider value={{ user, plano, loading, signIn, signOut }}>
       {children}
     </AuthContext.Provider>
   )

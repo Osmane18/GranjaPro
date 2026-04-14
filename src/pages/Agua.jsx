@@ -12,6 +12,8 @@ export default function Agua() {
   const [registros, setRegistros] = useState([])
   const [alertas, setAlertas] = useState([])
   const [modalOpen, setModalOpen] = useState(false)
+  const [editando, setEditando] = useState(null)
+  const [confirmarExcluir, setConfirmarExcluir] = useState(null)
   const [form, setForm] = useState({ galpao_id: '', data: new Date().toISOString().split('T')[0], consumo_litros: '', leitura_hidrometro: '', observacoes: '' })
   const [saving, setSaving] = useState(false)
   const [galpaoFiltro, setGalpaoFiltro] = useState('')
@@ -56,17 +58,37 @@ export default function Agua() {
     setAlertas(novosAlertas)
   }
 
+  function abrirEditar(r) {
+    setEditando(r)
+    setForm({ galpao_id: r.galpao_id, data: r.data, consumo_litros: r.consumo_litros ?? '', leitura_hidrometro: r.leitura_hidrometro ?? '', observacoes: r.observacoes ?? '' })
+    setModalOpen(true)
+  }
+
   async function handleSave(e) {
     e.preventDefault()
     if (!form.galpao_id || !form.consumo_litros) { toast.error('Preencha galpão e consumo.'); return }
     setSaving(true)
-    const { error } = await supabase.from('consumo_agua').insert({ produtor_id: user.id, ...form, consumo_litros: parseFloat(form.consumo_litros), leitura_hidrometro: form.leitura_hidrometro ? parseFloat(form.leitura_hidrometro) : null })
+    const payload = { galpao_id: form.galpao_id, data: form.data, consumo_litros: parseFloat(form.consumo_litros), leitura_hidrometro: form.leitura_hidrometro ? parseFloat(form.leitura_hidrometro) : null, observacoes: form.observacoes || null }
+    let error
+    if (editando) {
+      ({ error } = await supabase.from('consumo_agua').update(payload).eq('id', editando.id))
+    } else {
+      ({ error } = await supabase.from('consumo_agua').insert({ produtor_id: user.id, ...payload }))
+    }
     if (error) { toast.error('Erro: ' + error.message); setSaving(false); return }
-    toast.success('Consumo registrado!')
+    toast.success(editando ? 'Registro atualizado!' : 'Consumo registrado!')
     setModalOpen(false)
+    setEditando(null)
     setForm(f => ({ ...f, consumo_litros: '', leitura_hidrometro: '', observacoes: '' }))
     loadData()
     setSaving(false)
+  }
+
+  async function excluir(id) {
+    await supabase.from('consumo_agua').delete().eq('id', id)
+    toast.success('Registro excluído.')
+    setConfirmarExcluir(null)
+    loadData()
   }
 
   const filtrados = galpaoFiltro ? registros.filter(r => r.galpao_id === galpaoFiltro) : registros
@@ -74,12 +96,25 @@ export default function Agua() {
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-        <div>
+      {confirmarExcluir && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+          <div style={{ background: 'white', borderRadius: 16, padding: 32, maxWidth: 380, width: '100%', textAlign: 'center' }}>
+            <div style={{ fontSize: 40, marginBottom: 8 }}>🗑️</div>
+            <h3 style={{ fontSize: 17, fontWeight: 700, marginBottom: 8 }}>Excluir registro?</h3>
+            <p style={{ fontSize: 14, color: '#6b7280', marginBottom: 24 }}>Consumo de {confirmarExcluir.consumo_litros}L em {format(new Date(confirmarExcluir.data + 'T00:00:00'), 'dd/MM/yyyy')} será removido.</p>
+            <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
+              <button onClick={() => setConfirmarExcluir(null)} className="btn btn-secondary">Cancelar</button>
+              <button onClick={() => excluir(confirmarExcluir.id)} style={{ background: '#ef4444', color: 'white', border: 'none', borderRadius: 8, padding: '10px 24px', fontWeight: 700, cursor: 'pointer' }}>Excluir</button>
+            </div>
+          </div>
+        </div>
+      )}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24, gap: 12 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
           <h1 className="page-title">💧 Monitoramento de Água</h1>
           <p className="page-subtitle">Controle de consumo e detecção de vazamentos</p>
         </div>
-        <button className="btn btn-primary" onClick={() => setModalOpen(true)}>+ Registrar Consumo</button>
+        <button className="btn btn-primary" onClick={() => { setEditando(null); setForm({ galpao_id: galpoes[0]?.id || '', data: new Date().toISOString().split('T')[0], consumo_litros: '', leitura_hidrometro: '', observacoes: '' }); setModalOpen(true) }}>+ Registrar Consumo</button>
       </div>
 
       {/* Alertas de vazamento */}
@@ -137,7 +172,7 @@ export default function Agua() {
             <table className="table">
               <thead>
                 <tr>
-                  {['Data', 'Galpão', 'Consumo (L)', 'Hidrômetro', 'Status', 'Obs.'].map(h => <th key={h}>{h}</th>)}
+                  {['Data', 'Galpão', 'Consumo (L)', 'Hidrômetro', 'Status', 'Obs.', 'Ações'].map(h => <th key={h}>{h}</th>)}
                 </tr>
               </thead>
               <tbody>
@@ -161,7 +196,11 @@ export default function Agua() {
                           {status === 'alto' ? '🚨 Alto' : status === 'baixo' ? '⚠️ Baixo' : '✓ Normal'}
                         </span>
                       </td>
-                      <td style={{ color: 'var(--text-muted)', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.observacoes || '-'}</td>
+                      <td style={{ color: 'var(--text-muted)', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.observacoes || '-'}</td>
+                      <td><div style={{ display: 'flex', gap: 6 }}>
+                        <button onClick={() => abrirEditar(r)} style={{ background: '#dbeafe', color: '#1d4ed8', border: 'none', borderRadius: 6, padding: '4px 10px', fontWeight: 700, cursor: 'pointer', fontSize: 12 }}>✏️</button>
+                        <button onClick={() => setConfirmarExcluir(r)} style={{ background: '#fee2e2', color: '#ef4444', border: 'none', borderRadius: 6, padding: '4px 10px', fontWeight: 700, cursor: 'pointer', fontSize: 12 }}>🗑️</button>
+                      </div></td>
                     </tr>
                   )
                 })}
@@ -172,9 +211,12 @@ export default function Agua() {
       </div>
 
       {modalOpen && (
-        <div className="modal-overlay">
+        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setModalOpen(false)}>
           <div className="modal">
-            <h2 style={{ fontSize: 18, fontWeight: 800, marginBottom: 20 }}>💧 Registrar Consumo de Água</h2>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0 }}>💧 {editando ? 'Editar Registro' : 'Registrar Consumo de Água'}</h2>
+              <button onClick={() => setModalOpen(false)} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: 'var(--text-muted)' }}>✕</button>
+            </div>
             <form onSubmit={handleSave}>
               <div className="form-row">
                 <div className="form-group">
@@ -205,7 +247,7 @@ export default function Agua() {
               </div>
               <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', marginTop: 8 }}>
                 <button type="button" className="btn btn-secondary" onClick={() => setModalOpen(false)}>Cancelar</button>
-                <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Salvando...' : 'Salvar'}</button>
+                <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Salvando...' : editando ? 'Atualizar' : 'Salvar'}</button>
               </div>
             </form>
           </div>

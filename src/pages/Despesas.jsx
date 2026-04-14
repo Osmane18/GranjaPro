@@ -13,6 +13,8 @@ export default function Despesas() {
   const [lotes, setLotes] = useState([])
   const [despesas, setDespesas] = useState([])
   const [modalOpen, setModalOpen] = useState(false)
+  const [editando, setEditando] = useState(null)
+  const [confirmarExcluir, setConfirmarExcluir] = useState(null)
   const [form, setForm] = useState({ galpao_id: '', lote_id: '', data: new Date().toISOString().split('T')[0], categoria: 'Energia elétrica', descricao: '', valor: '' })
   const [saving, setSaving] = useState(false)
   const [galpaoFiltro, setGalpaoFiltro] = useState('')
@@ -33,25 +35,37 @@ export default function Despesas() {
     setDespesas(d || [])
   }
 
+  function abrirEditar(d) {
+    setEditando(d)
+    setForm({ galpao_id: d.galpao_id || '', lote_id: d.lote_id || '', data: d.data, categoria: d.categoria, descricao: d.descricao, valor: d.valor })
+    setModalOpen(true)
+  }
+
   async function handleSave(e) {
     e.preventDefault()
     if (!form.descricao || !form.valor) { toast.error('Preencha descrição e valor.'); return }
     setSaving(true)
-    const { error } = await supabase.from('despesas').insert({
-      produtor_id: user.id,
-      galpao_id: form.galpao_id || null,
-      lote_id: form.lote_id || null,
-      data: form.data,
-      categoria: form.categoria,
-      descricao: form.descricao,
-      valor: parseFloat(form.valor),
-    })
+    const payload = { galpao_id: form.galpao_id || null, lote_id: form.lote_id || null, data: form.data, categoria: form.categoria, descricao: form.descricao, valor: parseFloat(form.valor) }
+    let error
+    if (editando) {
+      ({ error } = await supabase.from('despesas').update(payload).eq('id', editando.id))
+    } else {
+      ({ error } = await supabase.from('despesas').insert({ produtor_id: user.id, ...payload }))
+    }
     if (error) { toast.error('Erro: ' + error.message); setSaving(false); return }
-    toast.success('Despesa registrada!')
+    toast.success(editando ? 'Despesa atualizada!' : 'Despesa registrada!')
     setModalOpen(false)
+    setEditando(null)
     setForm(f => ({ ...f, descricao: '', valor: '' }))
     loadData()
     setSaving(false)
+  }
+
+  async function excluir(id) {
+    await supabase.from('despesas').delete().eq('id', id)
+    toast.success('Despesa excluída.')
+    setConfirmarExcluir(null)
+    loadData()
   }
 
   const filtradas = galpaoFiltro ? despesas.filter(d => d.galpao_id === galpaoFiltro) : despesas
@@ -67,12 +81,25 @@ export default function Despesas() {
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-        <div>
+      {confirmarExcluir && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+          <div style={{ background: 'white', borderRadius: 16, padding: 32, maxWidth: 380, width: '100%', textAlign: 'center' }}>
+            <div style={{ fontSize: 40, marginBottom: 8 }}>🗑️</div>
+            <h3 style={{ fontSize: 17, fontWeight: 700, marginBottom: 8 }}>Excluir despesa?</h3>
+            <p style={{ fontSize: 14, color: '#6b7280', marginBottom: 24 }}><strong>{confirmarExcluir.descricao}</strong> — {fmtR(confirmarExcluir.valor)}</p>
+            <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
+              <button onClick={() => setConfirmarExcluir(null)} className="btn btn-secondary">Cancelar</button>
+              <button onClick={() => excluir(confirmarExcluir.id)} style={{ background: '#ef4444', color: 'white', border: 'none', borderRadius: 8, padding: '10px 24px', fontWeight: 700, cursor: 'pointer' }}>Excluir</button>
+            </div>
+          </div>
+        </div>
+      )}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24, gap: 12 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
           <h1 className="page-title">💸 Despesas</h1>
           <p className="page-subtitle">Controle de gastos da granja</p>
         </div>
-        <button className="btn btn-primary" onClick={() => setModalOpen(true)}>+ Nova Despesa</button>
+        <button className="btn btn-primary" onClick={() => { setEditando(null); setForm({ galpao_id: '', lote_id: '', data: new Date().toISOString().split('T')[0], categoria: 'Energia elétrica', descricao: '', valor: '' }); setModalOpen(true) }}>+ Nova Despesa</button>
       </div>
 
       {/* Card total */}
@@ -128,7 +155,7 @@ export default function Despesas() {
           <div style={{ overflowX: 'auto' }}>
             <table className="table">
               <thead>
-                <tr>{['Data', 'Categoria', 'Descrição', 'Galpão', 'Valor'].map(h => <th key={h}>{h}</th>)}</tr>
+                <tr>{['Data', 'Categoria', 'Descrição', 'Galpão', 'Valor', 'Ações'].map(h => <th key={h}>{h}</th>)}</tr>
               </thead>
               <tbody>
                 {filtradas.map(d => (
@@ -138,6 +165,10 @@ export default function Despesas() {
                     <td>{d.descricao}</td>
                     <td>{d.galpoes?.nome || '-'}</td>
                     <td style={{ fontWeight: 700, color: '#ef4444' }}>{fmtR(d.valor)}</td>
+                    <td><div style={{ display: 'flex', gap: 6 }}>
+                      <button onClick={() => abrirEditar(d)} style={{ background: '#dbeafe', color: '#1d4ed8', border: 'none', borderRadius: 6, padding: '4px 10px', fontWeight: 700, cursor: 'pointer', fontSize: 12 }}>✏️</button>
+                      <button onClick={() => setConfirmarExcluir(d)} style={{ background: '#fee2e2', color: '#ef4444', border: 'none', borderRadius: 6, padding: '4px 10px', fontWeight: 700, cursor: 'pointer', fontSize: 12 }}>🗑️</button>
+                    </div></td>
                   </tr>
                 ))}
               </tbody>
@@ -147,9 +178,12 @@ export default function Despesas() {
       </div>
 
       {modalOpen && (
-        <div className="modal-overlay">
+        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setModalOpen(false)}>
           <div className="modal">
-            <h2 style={{ fontSize: 18, fontWeight: 800, marginBottom: 20 }}>💸 Nova Despesa</h2>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0 }}>💸 {editando ? 'Editar Despesa' : 'Nova Despesa'}</h2>
+              <button onClick={() => setModalOpen(false)} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: 'var(--text-muted)' }}>✕</button>
+            </div>
             <form onSubmit={handleSave}>
               <div className="form-row">
                 <div className="form-group">
@@ -182,7 +216,7 @@ export default function Despesas() {
               </div>
               <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', marginTop: 8 }}>
                 <button type="button" className="btn btn-secondary" onClick={() => setModalOpen(false)}>Cancelar</button>
-                <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Salvando...' : 'Salvar'}</button>
+                <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Salvando...' : editando ? 'Atualizar' : 'Salvar'}</button>
               </div>
             </form>
           </div>

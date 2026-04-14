@@ -44,8 +44,8 @@ export default function Galpoes() {
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-        <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24, gap: 12 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
           <h1 className="page-title">🏚️ Galpões</h1>
           <p className="page-subtitle">{galpoes.length} galpão(ões) cadastrado(s)</p>
         </div>

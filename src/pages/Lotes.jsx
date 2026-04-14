@@ -7,12 +7,17 @@ import toast from 'react-hot-toast'
 const emptyForm = { galpao_id: '', numero_lote: '', data_entrada: new Date().toISOString().split('T')[0], quantidade_pintinhos: '', peso_medio_entrada: '', integradora: 'Vibra', observacoes: '' }
 const emptyAbate = { numero_aves_abatidas: '', peso_medio_abate_kg: '', total_caixas: '', valor_recebido: '', observacoes: '' }
 
+function nomeLote(l) {
+  return l.numero_lote ? `Lote ${l.numero_lote}` : format(new Date(l.data_entrada + 'T00:00:00'), 'dd/MM/yyyy')
+}
+
 export default function Lotes() {
   const { user } = useAuth()
   const [lotes, setLotes] = useState([])
   const [galpoes, setGalpoes] = useState([])
   const [modalOpen, setModalOpen] = useState(false)
-  const [abateModal, setAbateModal] = useState(null) // lote selecionado para abate
+  const [editando, setEditando] = useState(null)
+  const [abateModal, setAbateModal] = useState(null)
   const [form, setForm] = useState(emptyForm)
   const [abateForm, setAbateForm] = useState(emptyAbate)
   const [saving, setSaving] = useState(false)
@@ -26,26 +31,63 @@ export default function Lotes() {
     setLotes(l || [])
   }
 
+  function abrirNovo() {
+    setEditando(null)
+    setForm(emptyForm)
+    setModalOpen(true)
+  }
+
+  function abrirEditar(lote) {
+    setEditando(lote)
+    setForm({
+      galpao_id: lote.galpao_id,
+      numero_lote: lote.numero_lote || '',
+      data_entrada: lote.data_entrada,
+      quantidade_pintinhos: lote.quantidade_pintinhos || '',
+      peso_medio_entrada: lote.peso_medio_entrada || '',
+      integradora: lote.integradora || 'Vibra',
+      observacoes: lote.observacoes || '',
+    })
+    setModalOpen(true)
+  }
+
   async function handleSave(e) {
     e.preventDefault()
     if (!form.galpao_id || !form.quantidade_pintinhos) { toast.error('Preencha os campos obrigatórios.'); return }
     setSaving(true)
-    await supabase.from('lotes').update({ status: 'encerrado' }).eq('galpao_id', form.galpao_id).eq('status', 'ativo')
-    const { error } = await supabase.from('lotes').insert({
-      produtor_id: user.id,
-      galpao_id: form.galpao_id,
-      numero_lote: form.numero_lote || null,
-      data_entrada: form.data_entrada,
-      quantidade_pintinhos: parseInt(form.quantidade_pintinhos),
-      peso_medio_entrada: form.peso_medio_entrada ? parseFloat(form.peso_medio_entrada) : null,
-      integradora: form.integradora || 'Vibra',
-      observacoes: form.observacoes || null,
-      status: 'ativo',
-      data_previsao_abate: addDays(new Date(form.data_entrada), 45).toISOString().split('T')[0]
-    })
-    if (error) { toast.error('Erro: ' + error.message); setSaving(false); return }
-    toast.success('Lote iniciado!')
+
+    if (editando) {
+      const { error } = await supabase.from('lotes').update({
+        numero_lote: form.numero_lote || null,
+        data_entrada: form.data_entrada,
+        quantidade_pintinhos: parseInt(form.quantidade_pintinhos),
+        peso_medio_entrada: form.peso_medio_entrada ? parseFloat(form.peso_medio_entrada) : null,
+        integradora: form.integradora || 'Vibra',
+        observacoes: form.observacoes || null,
+        data_previsao_abate: addDays(new Date(form.data_entrada), 45).toISOString().split('T')[0],
+      }).eq('id', editando.id)
+      if (error) { toast.error('Erro: ' + error.message); setSaving(false); return }
+      toast.success('Lote atualizado!')
+    } else {
+      await supabase.from('lotes').update({ status: 'encerrado' }).eq('galpao_id', form.galpao_id).eq('status', 'ativo')
+      const { error } = await supabase.from('lotes').insert({
+        produtor_id: user.id,
+        galpao_id: form.galpao_id,
+        numero_lote: form.numero_lote || null,
+        data_entrada: form.data_entrada,
+        quantidade_pintinhos: parseInt(form.quantidade_pintinhos),
+        peso_medio_entrada: form.peso_medio_entrada ? parseFloat(form.peso_medio_entrada) : null,
+        integradora: form.integradora || 'Vibra',
+        observacoes: form.observacoes || null,
+        status: 'ativo',
+        data_previsao_abate: addDays(new Date(form.data_entrada), 45).toISOString().split('T')[0]
+      })
+      if (error) { toast.error('Erro: ' + error.message); setSaving(false); return }
+      toast.success('Lote iniciado!')
+    }
+
     setModalOpen(false)
+    setEditando(null)
     setForm(emptyForm)
     loadData()
     setSaving(false)
@@ -79,12 +121,12 @@ export default function Lotes() {
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-        <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24, gap: 12 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
           <h1 className="page-title">🐔 Lotes</h1>
           <p className="page-subtitle">{lotes.filter(l => l.status === 'ativo').length} lote(s) ativo(s)</p>
         </div>
-        <button className="btn btn-primary" onClick={() => { setForm(emptyForm); setModalOpen(true) }}>+ Novo Lote</button>
+        <button className="btn btn-primary" style={{ flexShrink: 0 }} onClick={abrirNovo}>+ Novo Lote</button>
       </div>
 
       <div className="card" style={{ overflow: 'hidden' }}>
@@ -114,9 +156,12 @@ export default function Lotes() {
                       <td>{l.valor_recebido ? `R$ ${l.valor_recebido.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : '-'}</td>
                       <td><span className={`badge ${l.status === 'ativo' ? 'badge-green' : 'badge-gray'}`}>{l.status === 'ativo' ? 'Ativo' : 'Encerrado'}</span></td>
                       <td>
-                        {l.status === 'ativo' && (
-                          <button className="btn btn-danger" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => encerrarLote(l.id)}>✂️ Abate</button>
-                        )}
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <button onClick={() => abrirEditar(l)} style={{ background: '#dbeafe', color: '#1d4ed8', border: 'none', borderRadius: 6, padding: '4px 10px', fontWeight: 700, cursor: 'pointer', fontSize: 12 }}>✏️</button>
+                          {l.status === 'ativo' && (
+                            <button className="btn btn-danger" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => encerrarLote(l.id)}>✂️ Abate</button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   )
@@ -127,16 +172,19 @@ export default function Lotes() {
         )}
       </div>
 
-      {/* Modal novo lote */}
+      {/* Modal novo/editar lote */}
       {modalOpen && (
-        <div className="modal-overlay">
+        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setModalOpen(false)}>
           <div className="modal">
-            <h2 style={{ fontSize: 18, fontWeight: 800, marginBottom: 20 }}>🐔 Novo Lote</h2>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0 }}>🐔 {editando ? 'Editar Lote' : 'Novo Lote'}</h2>
+              <button onClick={() => setModalOpen(false)} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: 'var(--text-muted)' }}>✕</button>
+            </div>
             <form onSubmit={handleSave}>
               <div className="form-row">
                 <div className="form-group">
                   <label className="form-label">Galpão *</label>
-                  <select className="form-input" value={form.galpao_id} onChange={e => setForm(f => ({ ...f, galpao_id: e.target.value }))} required>
+                  <select className="form-input" value={form.galpao_id} onChange={e => setForm(f => ({ ...f, galpao_id: e.target.value }))} required disabled={!!editando}>
                     <option value="">Selecione...</option>
                     {galpoes.map(g => <option key={g.id} value={g.id}>{g.nome}</option>)}
                   </select>
@@ -172,7 +220,7 @@ export default function Lotes() {
               </div>
               <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', marginTop: 8 }}>
                 <button type="button" className="btn btn-secondary" onClick={() => setModalOpen(false)}>Cancelar</button>
-                <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Salvando...' : 'Iniciar Lote'}</button>
+                <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Salvando...' : editando ? 'Atualizar' : 'Iniciar Lote'}</button>
               </div>
             </form>
           </div>
@@ -181,11 +229,14 @@ export default function Lotes() {
 
       {/* Modal de abate */}
       {abateModal && (
-        <div className="modal-overlay">
+        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setAbateModal(null)}>
           <div className="modal">
-            <h2 style={{ fontSize: 18, fontWeight: 800, marginBottom: 4 }}>✂️ Registrar Abate</h2>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+              <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0 }}>✂️ Registrar Abate</h2>
+              <button onClick={() => setAbateModal(null)} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: 'var(--text-muted)' }}>✕</button>
+            </div>
             <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 20 }}>
-              Lote {abateModal.numero_lote || '#'} — {abateModal.galpoes?.nome}
+              {nomeLote(abateModal)} — {abateModal.galpoes?.nome}
             </p>
             <form onSubmit={handleAbate}>
               <div className="form-row">

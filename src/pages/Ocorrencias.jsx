@@ -66,12 +66,12 @@ export default function Ocorrencias() {
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-        <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24, gap: 12 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
           <h1 className="page-title">⚠️ Ocorrências</h1>
           <p className="page-subtitle">{abertas.length} ocorrência(s) em aberto</p>
         </div>
-        <button className="btn btn-primary" onClick={() => setModalOpen(true)}>+ Nova Ocorrência</button>
+        <button className="btn btn-primary" style={{ flexShrink: 0 }} onClick={() => setModalOpen(true)}>+ Nova Ocorrência</button>
       </div>
 
       {/* Alertas urgentes */}
@@ -124,9 +124,12 @@ export default function Ocorrencias() {
       </div>
 
       {modalOpen && (
-        <div className="modal-overlay">
+        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setModalOpen(false)}>
           <div className="modal">
-            <h2 style={{ fontSize: 18, fontWeight: 800, marginBottom: 20 }}>⚠️ Nova Ocorrência</h2>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0 }}>⚠️ Nova Ocorrência</h2>
+              <button onClick={() => setModalOpen(false)} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: 'var(--text-muted)' }}>✕</button>
+            </div>
             <form onSubmit={handleSave}>
               <div className="form-row">
                 <div className="form-group">

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 
 export default function Login() {
@@ -15,7 +15,7 @@ export default function Login() {
     setLoading(true)
     setErro('')
     const { error } = await signIn(email, senha)
-    if (error) { setErro('Email ou senha incorretos.'); setLoading(false); return }
+    if (error) { setErro(error.message || 'Email ou senha incorretos.'); setLoading(false); return }
     navigate('/')
   }
 
@@ -41,6 +41,9 @@ export default function Login() {
             {loading ? 'Entrando...' : 'Entrar'}
           </button>
         </form>
+        <p style={{ textAlign: 'center', marginTop: 20, fontSize: 14, color: '#6b7b6b' }}>
+          Não tem conta? <Link to="/cadastro" style={{ color: '#1b4332', fontWeight: 600 }}>Cadastre-se</Link>
+        </p>
       </div>
     </div>
   )
