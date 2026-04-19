@@ -33,6 +33,12 @@ export default function Layout() {
   const [lotes, setLotes] = useState([])
   const [form, setForm] = useState({ lote_id: '', mortalidade: '', peso_medio_g: '', consumo_racao_kg: '' })
   const [salvando, setSalvando] = useState(false)
+  const [modalSenha, setModalSenha] = useState(false)
+  const [novaSenha, setNovaSenha] = useState('')
+  const [confirmarSenha, setConfirmarSenha] = useState('')
+  const [salvandoSenha, setSalvandoSenha] = useState(false)
+  const [erroSenha, setErroSenha] = useState('')
+  const [sucessoSenha, setSucessoSenha] = useState('')
 
   useEffect(() => {
     if (modalRapido && lotes.length === 0) carregarLotes()
@@ -71,6 +77,19 @@ export default function Layout() {
     setForm(f => ({ ...f, mortalidade: '', peso_medio_g: '', consumo_racao_kg: '' }))
     setModalRapido(false)
     setSalvando(false)
+  }
+
+  async function handleTrocarSenha(e) {
+    e.preventDefault()
+    if (novaSenha !== confirmarSenha) { setErroSenha('As senhas não coincidem.'); return }
+    if (novaSenha.length < 6) { setErroSenha('A senha deve ter pelo menos 6 caracteres.'); return }
+    setSalvandoSenha(true)
+    setErroSenha('')
+    const { error } = await supabase.auth.updateUser({ password: novaSenha })
+    setSalvandoSenha(false)
+    if (error) { setErroSenha('Não foi possível alterar a senha.'); return }
+    setSucessoSenha('Senha alterada com sucesso!')
+    setTimeout(() => { setModalSenha(false); setNovaSenha(''); setConfirmarSenha(''); setSucessoSenha('') }, 2000)
   }
 
   async function handleLogout() {
@@ -146,6 +165,9 @@ export default function Layout() {
             </div>
           </div>
 
+          <button onClick={() => { setModalSenha(true); setErroSenha(''); setSucessoSenha('') }} className="sidebar-item" style={{ width: '100%', color: 'rgba(255,255,255,0.6)' }}>
+            <span className="icon">🔑</span> Trocar senha
+          </button>
           <button onClick={handleLogout} className="sidebar-item" style={{ width: '100%', color: 'rgba(255,255,255,0.6)' }}>
             <span className="icon">🚪</span> Sair
           </button>
@@ -199,6 +221,35 @@ export default function Layout() {
       </div>
       {/* Fecha speed-dial ao clicar fora */}
       {speedDial && <div style={{ position: 'fixed', inset: 0, zIndex: 999 }} onClick={() => setSpeedDial(false)} />}
+
+      {/* Modal trocar senha */}
+      {modalSenha && (
+        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setModalSenha(false)}>
+          <div className="modal" style={{ maxWidth: 360 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <h2 style={{ fontSize: 18, fontWeight: 900, margin: 0 }}>🔑 Trocar Senha</h2>
+              <button onClick={() => setModalSenha(false)} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: 'var(--text-muted)' }}>✕</button>
+            </div>
+            {erroSenha && <div className="alert alert-red" style={{ marginBottom: 16 }}><span>⚠️</span>{erroSenha}</div>}
+            {sucessoSenha && <div className="alert alert-green" style={{ marginBottom: 16 }}><span>✅</span>{sucessoSenha}</div>}
+            {!sucessoSenha && (
+              <form onSubmit={handleTrocarSenha}>
+                <div className="form-group">
+                  <label className="form-label">Nova senha</label>
+                  <input className="form-input" type="password" value={novaSenha} onChange={e => setNovaSenha(e.target.value)} placeholder="••••••••" required />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Confirmar nova senha</label>
+                  <input className="form-input" type="password" value={confirmarSenha} onChange={e => setConfirmarSenha(e.target.value)} placeholder="••••••••" required />
+                </div>
+                <button type="submit" className="btn btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: 8 }} disabled={salvandoSenha}>
+                  {salvandoSenha ? 'Salvando...' : 'Salvar nova senha'}
+                </button>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Modal de registro rápido */}
       {modalRapido && (

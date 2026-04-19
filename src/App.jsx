@@ -18,6 +18,7 @@ import Despesas from './pages/Despesas'
 import Admin from './pages/Admin'
 import Linhas from './pages/Linhas'
 import Monitoramento from './pages/Monitoramento'
+import RedefinirSenha from './pages/RedefinirSenha'
 
 function PrivateRoute({ children }) {
   const { user, plano, loading } = useAuth()
@@ -103,6 +104,7 @@ function AppRoutes() {
       <Route path="/landing" element={<Landing />} />
       <Route path="/login" element={user ? <Navigate to="/" /> : <Login />} />
       <Route path="/cadastro" element={user && plano && plano.status !== 'pendente' ? <Navigate to="/" /> : <Cadastro />} />
+      <Route path="/redefinir-senha" element={<RedefinirSenha />} />
       <Route path="/" element={user ? <PrivateRoute><Layout /></PrivateRoute> : <Landing />}>
         <Route index element={<Dashboard />} />
         <Route path="galpoes" element={<Galpoes />} />
